@@ -6,4 +6,5 @@ public class TransferIstek
     public Guid AliciHesapId { get; set; }
     public decimal Amount { get; set; }
     public string? Aciklama { get; set; }
+    public string TotpCode { get; set; } = string.Empty;
 }

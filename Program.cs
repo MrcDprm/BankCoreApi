@@ -9,6 +9,7 @@ builder.Services.AddDbContext<BankaDbContext>(options =>
 
 builder.Services.AddScoped<IHesapServis, HesapServis>();
 builder.Services.AddScoped<ITransferServis, TransferServis>();
+builder.Services.AddSingleton<ITotpServis, TotpServis>();
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
