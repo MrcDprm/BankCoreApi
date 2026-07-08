@@ -35,8 +35,11 @@ public class BankaDbContext : DbContext
         {
             entity.Property(e => e.AnaPara).HasPrecision(18, 2);
             entity.Property(e => e.FaizOrani).HasPrecision(18, 2);
+            entity.Property(e => e.AylikTaksit).HasPrecision(18, 2);
+            entity.Property(e => e.AylikFaizOrani).HasPrecision(18, 6);
             entity.Property(e => e.ToplamBorc).HasPrecision(18, 2);
             entity.Property(e => e.KalanBorc).HasPrecision(18, 2);
+            entity.Property(e => e.KrediTuru).HasMaxLength(20);
             entity.Property(e => e.Durum).HasMaxLength(50);
         });
     }
