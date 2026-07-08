@@ -8,6 +8,7 @@ builder.Services.AddDbContext<BankaDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<IHesapServis, HesapServis>();
+builder.Services.AddScoped<ITransferServis, TransferServis>();
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
