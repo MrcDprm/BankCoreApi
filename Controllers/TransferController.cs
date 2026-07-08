@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BankCoreApi.Controllers.Dtos;
 using BankCoreApi.Data;
 using BankCoreApi.Services;
@@ -26,39 +27,60 @@ public class TransferController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> TransferYap([FromBody] TransferIstek istek)
     {
-        if (istek.Amount <= 0)
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!Guid.TryParse(userId, out var gonderenHesapId))
         {
-            return BadRequest("Transfer miktari 0'dan buyuk olmalidir.");
+            return Unauthorized();
         }
 
-        if (istek.GonderenHesapId == istek.AliciHesapId)
+        if (istek.Miktar <= 0)
         {
-            return BadRequest("Gonderen ve alici hesabi ayni olamaz.");
+            return BadRequest(new { mesaj = "Transfer miktari 0'dan buyuk olmalidir." });
         }
 
-        var hesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == istek.GonderenHesapId);
-        if (hesap is null)
+        if (string.IsNullOrWhiteSpace(istek.AliciHesapNo))
         {
-            return BadRequest("Gonderen hesap bulunamadi.");
+            return BadRequest(new { mesaj = "Alici hesap numarasi zorunludur." });
         }
 
-        if (string.IsNullOrWhiteSpace(hesap.TotpSecretKey))
+        var gonderenHesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == gonderenHesapId);
+
+        if (gonderenHesap is null)
         {
-            return BadRequest("Bu hesap icin 2FA aktif degil. Once TOTP kurun.");
+            return BadRequest(new { mesaj = "Gonderen hesap bulunamadi." });
         }
 
-        if (!_totpServis.KoduDogrula(hesap.TotpSecretKey, istek.TotpCode))
+        if (string.IsNullOrWhiteSpace(gonderenHesap.TotpSecretKey))
         {
-            return BadRequest("Gecersiz veya suresi dolmus 2FA kodu.");
+            return BadRequest(new { mesaj = "Bu hesap icin 2FA aktif degil. Once TOTP kurun." });
+        }
+
+        if (!_totpServis.KoduDogrula(gonderenHesap.TotpSecretKey, istek.TotpKodu))
+        {
+            return BadRequest(new { mesaj = "Gecersiz veya suresi dolmus 2FA kodu." });
+        }
+
+        var aliciHesapNo = istek.AliciHesapNo.Trim();
+        var aliciHesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.HesapNo == aliciHesapNo);
+
+        if (aliciHesap is null)
+        {
+            return BadRequest(new { mesaj = "Alici hesap bulunamadi." });
+        }
+
+        if (gonderenHesap.Id == aliciHesap.Id)
+        {
+            return BadRequest(new { mesaj = "Gonderen ve alici hesabi ayni olamaz." });
         }
 
         try
         {
             await _transferServis.TransferYapAsync(
-                istek.GonderenHesapId,
-                istek.AliciHesapId,
-                istek.Amount,
-                istek.Aciklama ?? string.Empty);
+                gonderenHesap.Id,
+                aliciHesap.Id,
+                istek.Miktar,
+                "Para Transferi");
 
             return Ok(new { mesaj = "Transfer basariyla tamamlandi." });
         }
