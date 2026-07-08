@@ -1,5 +1,6 @@
 using BankCoreApi.Controllers.Dtos;
 using BankCoreApi.Data;
+using BankCoreApi.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,43 @@ public class AdminController : ControllerBase
             HavuzBakiyesi = havuzBakiyesi,
             KullanicilarToplamBakiyesi = kullanicilarToplamBakiyesi
         });
+    }
+
+    [HttpPost("fon-ekle")]
+    public async Task<IActionResult> FonEkle([FromBody] FonEkleIstek istek)
+    {
+        if (istek.Miktar <= 0)
+        {
+            return BadRequest("Enjekte edilecek miktar 0'dan büyük olmalıdır.");
+        }
+
+        if (istek.Miktar > 1_000_000_000m)
+        {
+            return BadRequest("Tek seferde en fazla 1 Milyar TL fon enjekte edilebilir.");
+        }
+
+        var havuzHesap = await _context.Hesaplar
+            .FirstOrDefaultAsync(h => h.Email == "havuz@bankacuzdan.com");
+
+        if (havuzHesap is null)
+        {
+            return BadRequest("Banka sistem havuzu hesabı bulunamadı.");
+        }
+
+        var kayit = new DefterKayit
+        {
+            Id = Guid.NewGuid(),
+            HesapId = havuzHesap.Id,
+            IslemGrupId = Guid.NewGuid(),
+            Amount = istek.Miktar,
+            Aciklama = "Merkez Bankası Fon Enjeksiyonu",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.DefterKayitlar.Add(kayit);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { mesaj = "Fon başarıyla kasaya enjekte edildi." });
     }
 }
 
