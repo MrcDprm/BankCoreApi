@@ -11,6 +11,7 @@ public class BankaDbContext : DbContext
 
     public DbSet<Hesap> Hesaplar { get; set; }
     public DbSet<DefterKayit> DefterKayitlar { get; set; }
+    public DbSet<Kredi> Krediler { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -28,6 +29,15 @@ public class BankaDbContext : DbContext
         {
             entity.Property(e => e.Aciklama).HasMaxLength(255);
             entity.Property(e => e.Amount).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<Kredi>(entity =>
+        {
+            entity.Property(e => e.AnaPara).HasPrecision(18, 2);
+            entity.Property(e => e.FaizOrani).HasPrecision(18, 2);
+            entity.Property(e => e.ToplamBorc).HasPrecision(18, 2);
+            entity.Property(e => e.KalanBorc).HasPrecision(18, 2);
+            entity.Property(e => e.Durum).HasMaxLength(50);
         });
     }
 }

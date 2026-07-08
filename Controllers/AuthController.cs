@@ -100,6 +100,11 @@ public class AuthController : ControllerBase
             new Claim(ClaimTypes.Email, hesap.Email)
         };
 
+        if (hesap.IsAdmin)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "Admin"));
+        }
+
         var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
