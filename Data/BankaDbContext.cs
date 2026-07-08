@@ -17,8 +17,11 @@ public class BankaDbContext : DbContext
         modelBuilder.Entity<Hesap>(entity =>
         {
             entity.HasIndex(e => e.HesapNo).IsUnique();
+            entity.HasIndex(e => e.Email).IsUnique();
             entity.Property(e => e.HesapNo).HasMaxLength(20);
             entity.Property(e => e.HesapSahibiAd).HasMaxLength(100);
+            entity.Property(e => e.Email).HasMaxLength(255);
+            entity.Property(e => e.SifreHash).HasMaxLength(255);
         });
 
         modelBuilder.Entity<DefterKayit>(entity =>

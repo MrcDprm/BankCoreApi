@@ -1,11 +1,13 @@
 using BankCoreApi.Controllers.Dtos;
 using BankCoreApi.Data;
 using BankCoreApi.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace BankCoreApi.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class TransferController : ControllerBase

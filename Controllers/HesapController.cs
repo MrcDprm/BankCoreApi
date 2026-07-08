@@ -1,11 +1,14 @@
+using System.Security.Claims;
 using BankCoreApi.Controllers.Dtos;
 using BankCoreApi.Data;
 using BankCoreApi.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace BankCoreApi.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class HesapController : ControllerBase
@@ -21,16 +24,44 @@ public class HesapController : ControllerBase
         _context = context;
     }
 
-    [HttpPost("olustur")]
-    public async Task<IActionResult> Olustur([FromBody] HesapOlusturIstek istek)
+    [HttpGet("ozet")]
+    public async Task<IActionResult> GetHesapOzet()
     {
-        if (string.IsNullOrWhiteSpace(istek.HesapSahibiAd))
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!Guid.TryParse(userId, out var hesapId))
         {
-            return BadRequest("Hesap sahibi adi bos olamaz.");
+            return Unauthorized();
         }
 
-        var hesap = await _hesapServis.HesapOlusturAsync(istek.HesapSahibiAd);
-        return Ok(hesap);
+        var hesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == hesapId);
+
+        if (hesap is null)
+        {
+            return NotFound();
+        }
+
+        var bakiye = await _context.DefterKayitlar
+            .Where(d => d.HesapId == hesapId)
+            .SumAsync(d => d.Amount);
+
+        var sonIslemler = await _context.DefterKayitlar
+            .Where(d => d.HesapId == hesapId)
+            .OrderByDescending(d => d.CreatedAt)
+            .Take(10)
+            .Select(d => new IslemOzet(d.Amount, d.Aciklama, d.CreatedAt))
+            .ToListAsync();
+
+        var totpAktifMi = !string.IsNullOrWhiteSpace(hesap.TotpSecretKey);
+
+        var ozet = new HesapOzetResponse(
+            hesap.HesapSahibiAd,
+            hesap.HesapNo,
+            bakiye,
+            totpAktifMi,
+            sonIslemler);
+
+        return Ok(ozet);
     }
 
     [HttpGet("{id:guid}/bakiye")]
