@@ -105,6 +105,10 @@ public class HesapController : ControllerBase
                 .ToDictionaryAsync(h => h.Id)
             : new Dictionary<Guid, Hesap>();
 
+        var kayitliAlicilar = await _context.KayitliAlicilar
+            .Where(k => k.HesapId == hesapId)
+            .ToDictionaryAsync(k => k.KarsiHesapId, k => k.KayitliAd);
+
         var sonIslemler = kayitlar.Select(kayit =>
         {
             string? karsiHesapAdSoyad = null;
@@ -114,10 +118,18 @@ public class HesapController : ControllerBase
                 karsiHesaplar.TryGetValue(karsiHesapId, out var karsiHesap) &&
                 !string.Equals(karsiHesap.Email, HavuzEmail, StringComparison.OrdinalIgnoreCase))
             {
-                karsiHesapAdSoyad = MaskelemeHelper.MaskeleAdSoyad(karsiHesap.HesapSahibiAd);
-                if (string.IsNullOrEmpty(karsiHesapAdSoyad))
+                if (kayitliAlicilar.TryGetValue(karsiHesapId, out var kayitliAd) &&
+                    !string.IsNullOrWhiteSpace(kayitliAd))
                 {
-                    karsiHesapAdSoyad = null;
+                    karsiHesapAdSoyad = kayitliAd;
+                }
+                else
+                {
+                    karsiHesapAdSoyad = MaskelemeHelper.MaskeleAdSoyad(karsiHesap.HesapSahibiAd);
+                    if (string.IsNullOrEmpty(karsiHesapAdSoyad))
+                    {
+                        karsiHesapAdSoyad = null;
+                    }
                 }
             }
 

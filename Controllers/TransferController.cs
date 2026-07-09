@@ -82,7 +82,12 @@ public class TransferController : ControllerBase
                 istek.Miktar,
                 "Para Transferi");
 
-            return Ok(new { mesaj = "Transfer basariyla tamamlandi." });
+            return Ok(new
+            {
+                mesaj = "Transfer başarıyla tamamlandı.",
+                aliciHesapId = aliciHesap.Id,
+                aliciAdSoyad = aliciHesap.HesapSahibiAd
+            });
         }
         catch (InvalidOperationException ex)
         {

@@ -13,6 +13,7 @@ public class BankaDbContext : DbContext
     public DbSet<DefterKayit> DefterKayitlar { get; set; }
     public DbSet<Kredi> Krediler { get; set; }
     public DbSet<SanalKart> SanalKartlar { get; set; }
+    public DbSet<KayitliAlici> KayitliAlicilar { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,9 +49,17 @@ public class BankaDbContext : DbContext
         {
             entity.Property(e => e.KartAdi).HasMaxLength(100);
             entity.Property(e => e.AylikLimit).HasPrecision(18, 2);
+            entity.Property(e => e.Bakiye).HasPrecision(18, 2);
             entity.Property(e => e.KartNoSifreli).HasMaxLength(512);
             entity.Property(e => e.CvvSifreli).HasMaxLength(256);
             entity.Property(e => e.Durum).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<KayitliAlici>(entity =>
+        {
+            entity.Property(e => e.Iban).HasMaxLength(20);
+            entity.Property(e => e.KayitliAd).HasMaxLength(100);
+            entity.HasIndex(e => new { e.HesapId, e.KarsiHesapId }).IsUnique();
         });
     }
 }

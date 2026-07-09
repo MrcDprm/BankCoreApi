@@ -1,5 +1,8 @@
+using System.Globalization;
 using BankCoreApi.Data;
 using BankCoreApi.Entities;
+using BankCoreApi.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace BankCoreApi.Services;
@@ -13,11 +16,16 @@ public class TransferServis : ITransferServis
 
     private readonly BankaDbContext _context;
     private readonly IHesapServis _hesapServis;
+    private readonly IHubContext<NotificationHub> _hubContext;
 
-    public TransferServis(BankaDbContext context, IHesapServis hesapServis)
+    public TransferServis(
+        BankaDbContext context,
+        IHesapServis hesapServis,
+        IHubContext<NotificationHub> hubContext)
     {
         _context = context;
         _hesapServis = hesapServis;
+        _hubContext = hubContext;
     }
 
     public async Task<bool> TransferYapAsync(Guid gonderenHesapId, Guid aliciHesapId, decimal Amount, string aciklama)
@@ -109,6 +117,12 @@ public class TransferServis : ITransferServis
 
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
+
+            var miktarMetni = Amount.ToString("N2", CultureInfo.GetCultureInfo("tr-TR"));
+            await _hubContext.Clients.User(aliciHesapId.ToString())
+                .SendAsync(
+                    "ReceiveNotification",
+                    $"Hesabınıza {miktarMetni} TL tutarında bir transfer geldi!");
 
             return true;
         }

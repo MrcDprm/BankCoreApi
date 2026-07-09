@@ -1,5 +1,6 @@
 using System.Text;
 using BankCoreApi.Data;
+using BankCoreApi.Hubs;
 using BankCoreApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,7 @@ builder.Services.AddDbContext<BankaDbContext>(options =>
 builder.Services.AddScoped<IHesapServis, HesapServis>();
 builder.Services.AddScoped<ITransferServis, TransferServis>();
 builder.Services.AddSingleton<ITotpServis, TotpServis>();
+builder.Services.AddSignalR();
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? string.Empty;
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
@@ -32,6 +34,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization();
@@ -43,7 +62,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins("http://localhost:3000")
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 builder.Services.AddSwaggerGen(c =>
@@ -86,5 +106,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<NotificationHub>("/hubs/notification");
 
 app.Run();
