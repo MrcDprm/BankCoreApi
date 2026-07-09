@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BankCoreApi.Controllers.Dtos;
 using BankCoreApi.Data;
 using BankCoreApi.Entities;
+using BankCoreApi.Helpers;
 using BankCoreApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +15,9 @@ namespace BankCoreApi.Controllers;
 [Route("api/[controller]")]
 public class HesapController : ControllerBase
 {
+    private const string TransferAciklama = "Para Transferi";
+    private const string HavuzEmail = "havuz@bankacuzdan.com";
+
     private readonly BankaDbContext _context;
     private readonly IHesapServis _hesapServis;
     private readonly ITotpServis _totpServis;
@@ -46,12 +50,57 @@ public class HesapController : ControllerBase
             .Where(d => d.HesapId == hesapId)
             .SumAsync(d => d.Amount);
 
-        var sonIslemler = await _context.DefterKayitlar
+        var kayitlar = await _context.DefterKayitlar
             .Where(d => d.HesapId == hesapId)
             .OrderByDescending(d => d.CreatedAt)
             .Take(10)
-            .Select(d => new IslemOzet(d.Amount, d.Aciklama, d.CreatedAt))
             .ToListAsync();
+
+        var transferGrupIdleri = kayitlar
+            .Where(k => k.Aciklama == TransferAciklama)
+            .Select(k => k.IslemGrupId)
+            .Distinct()
+            .ToList();
+
+        var karsiHesapIdByGrup = new Dictionary<Guid, Guid>();
+
+        if (transferGrupIdleri.Count > 0)
+        {
+            var karsiKayitlar = await _context.DefterKayitlar
+                .Where(d => transferGrupIdleri.Contains(d.IslemGrupId) && d.HesapId != hesapId)
+                .ToListAsync();
+
+            foreach (var karsiKayit in karsiKayitlar)
+            {
+                karsiHesapIdByGrup.TryAdd(karsiKayit.IslemGrupId, karsiKayit.HesapId);
+            }
+        }
+
+        var karsiHesapIdleri = karsiHesapIdByGrup.Values.Distinct().ToList();
+        var karsiHesaplar = karsiHesapIdleri.Count > 0
+            ? await _context.Hesaplar
+                .Where(h => karsiHesapIdleri.Contains(h.Id))
+                .ToDictionaryAsync(h => h.Id)
+            : new Dictionary<Guid, Hesap>();
+
+        var sonIslemler = kayitlar.Select(kayit =>
+        {
+            string? karsiHesapAdSoyad = null;
+
+            if (kayit.Aciklama == TransferAciklama &&
+                karsiHesapIdByGrup.TryGetValue(kayit.IslemGrupId, out var karsiHesapId) &&
+                karsiHesaplar.TryGetValue(karsiHesapId, out var karsiHesap) &&
+                !string.Equals(karsiHesap.Email, HavuzEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                karsiHesapAdSoyad = MaskelemeHelper.MaskeleAdSoyad(karsiHesap.HesapSahibiAd);
+                if (string.IsNullOrEmpty(karsiHesapAdSoyad))
+                {
+                    karsiHesapAdSoyad = null;
+                }
+            }
+
+            return new IslemOzet(kayit.Amount, kayit.Aciklama, kayit.CreatedAt, karsiHesapAdSoyad);
+        }).ToList();
 
         var totpAktifMi = !string.IsNullOrWhiteSpace(hesap.TotpSecretKey);
 
