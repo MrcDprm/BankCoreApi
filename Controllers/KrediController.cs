@@ -13,6 +13,9 @@ namespace BankCoreApi.Controllers;
 [Route("api/[controller]")]
 public class KrediController : ControllerBase
 {
+    private const decimal SonTaksitTolerans = 2m;
+    private const decimal GecikmeGunlukOran = 0.005m;
+
     private readonly BankaDbContext _context;
 
     public KrediController(BankaDbContext context)
@@ -25,17 +28,22 @@ public class KrediController : ControllerBase
     {
         if (istek.Miktar <= 0)
         {
-            return BadRequest("Kredi miktarı 0'dan büyük olmalıdır.");
+            return BadRequest(new { mesaj = "Kredi miktarı 0'dan büyük olmalıdır." });
         }
 
         if (istek.VadeAy < 1 || istek.VadeAy > 36)
         {
-            return BadRequest("Vade 1 ile 36 ay arasında olmalıdır.");
+            return BadRequest(new { mesaj = "Vade 1 ile 36 ay arasında olmalıdır." });
         }
 
-        if (!TryGetAylikFaizOrani(istek.KrediTuru, out var aylikFaizOrani))
+        if (string.IsNullOrWhiteSpace(istek.KrediAltTuru))
         {
-            return BadRequest("Geçerli bir kredi türü seçin.");
+            return BadRequest(new { mesaj = "Kredi alt türü seçilmelidir." });
+        }
+
+        if (!TryGetAylikFaizOrani(istek.KrediTuru, istek.KrediAltTuru, istek.VadeAy, out var aylikFaizOrani))
+        {
+            return BadRequest(new { mesaj = "Geçerli bir kredi türü ve alt türü seçin." });
         }
 
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -45,88 +53,46 @@ public class KrediController : ControllerBase
             return Unauthorized();
         }
 
-        var havuzHesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Email == "havuz@bankacuzdan.com");
+        var bekleyenVar = await _context.Krediler
+            .AnyAsync(k => k.HesapId == hesapId && k.Durum == "Beklemede");
 
-        if (havuzHesap is null)
+        if (bekleyenVar)
         {
-            return BadRequest("Banka sistem havuzu hesabı bulunamadı.");
+            return BadRequest(new { mesaj = "Zaten bekleyen bir kredi başvurunuz var." });
         }
 
-        var havuzBakiyesi = await _context.DefterKayitlar
-            .Where(k => k.HesapId == havuzHesap.Id)
-            .SumAsync(k => (decimal?)k.Amount) ?? 0m;
+        var aylikTaksit = Math.Round(HesaplaAylikTaksit(istek.Miktar, aylikFaizOrani, istek.VadeAy), 2);
+        var toplamBorc = Math.Round(aylikTaksit * istek.VadeAy, 2);
+        var now = DateTime.UtcNow;
 
-        if (havuzBakiyesi < istek.Miktar)
+        var kredi = new Kredi
         {
-            return BadRequest("Banka kasasında bu işlemi gerçekleştirmek için yeterli likidite bulunmuyor.");
-        }
+            Id = Guid.NewGuid(),
+            HesapId = hesapId,
+            AnaPara = istek.Miktar,
+            FaizOrani = aylikFaizOrani,
+            KrediTuru = istek.KrediTuru,
+            KrediAltTuru = istek.KrediAltTuru,
+            AylikFaizOrani = aylikFaizOrani,
+            AylikTaksit = aylikTaksit,
+            ToplamBorc = toplamBorc,
+            KalanBorc = toplamBorc,
+            VadeTarihi = now.AddMonths(istek.VadeAy),
+            SonrakiTaksitTarihi = null,
+            Durum = "Beklemede",
+            CreatedAt = now
+        };
 
-        var aylikTaksit = HesaplaAylikTaksit(istek.Miktar, aylikFaizOrani, istek.VadeAy);
-        var toplamBorc = aylikTaksit * istek.VadeAy;
+        _context.Krediler.Add(kredi);
+        await _context.SaveChangesAsync();
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-
-        try
+        return Ok(new
         {
-            var now = DateTime.UtcNow;
-            var islemGrupId = Guid.NewGuid();
-            const string aciklama = "Kredi Tahsisi";
-
-            var kredi = new Kredi
-            {
-                Id = Guid.NewGuid(),
-                HesapId = hesapId,
-                AnaPara = istek.Miktar,
-                FaizOrani = aylikFaizOrani,
-                KrediTuru = istek.KrediTuru,
-                AylikFaizOrani = aylikFaizOrani,
-                AylikTaksit = aylikTaksit,
-                ToplamBorc = toplamBorc,
-                KalanBorc = toplamBorc,
-                VadeTarihi = now.AddMonths(istek.VadeAy),
-                Durum = "Aktif",
-                CreatedAt = now
-            };
-
-            var havuzKaydi = new DefterKayit
-            {
-                Id = Guid.NewGuid(),
-                HesapId = havuzHesap.Id,
-                IslemGrupId = islemGrupId,
-                Amount = -istek.Miktar,
-                Aciklama = aciklama,
-                CreatedAt = now
-            };
-
-            var kullaniciKaydi = new DefterKayit
-            {
-                Id = Guid.NewGuid(),
-                HesapId = hesapId,
-                IslemGrupId = islemGrupId,
-                Amount = istek.Miktar,
-                Aciklama = aciklama,
-                CreatedAt = now
-            };
-
-            _context.Krediler.Add(kredi);
-            _context.DefterKayitlar.Add(havuzKaydi);
-            _context.DefterKayitlar.Add(kullaniciKaydi);
-
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            return Ok(new
-            {
-                mesaj = "Kredi onaylandı ve hesabınıza aktarıldı.",
-                aylikTaksit = aylikTaksit,
-                toplamBorc = toplamBorc
-            });
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            return StatusCode(500, new { mesaj = "Beklenmeyen bir hata oluştu." });
-        }
+            mesaj = "Kredi başvurunuz alındı. Onay bekleniyor.",
+            aylikTaksit = aylikTaksit,
+            toplamBorc = toplamBorc,
+            aylikFaizOrani = aylikFaizOrani
+        });
     }
 
     [HttpGet("aktif-krediler")]
@@ -141,15 +107,17 @@ public class KrediController : ControllerBase
 
         var krediler = await _context.Krediler
             .Where(k => k.HesapId == hesapId && k.Durum != "Kapandi")
-            .OrderByDescending(k => k.VadeTarihi)
+            .OrderByDescending(k => k.CreatedAt)
             .Select(k => new KrediOzetResponse(
                 k.Id,
                 k.KrediTuru,
+                k.KrediAltTuru,
                 k.ToplamBorc,
                 k.KalanBorc,
                 k.AylikTaksit,
                 k.VadeTarihi,
-                k.Durum))
+                k.Durum,
+                k.SonrakiTaksitTarihi))
             .ToListAsync();
 
         return Ok(krediler);
@@ -172,28 +140,52 @@ public class KrediController : ControllerBase
             return BadRequest(new { mesaj = "Kredi bulunamadı." });
         }
 
-        if (kredi.Durum == "Kapandi")
+        if (kredi.Durum != "Aktif")
         {
-            return BadRequest(new { mesaj = "Bu kredi için ödeme yapılamaz." });
+            return BadRequest(new { mesaj = "Yalnızca aktif krediler için taksit ödemesi yapılabilir." });
         }
 
-        var odenecekTutar = kredi.KalanBorc < kredi.AylikTaksit ? kredi.KalanBorc : kredi.AylikTaksit;
+        if (!kredi.SonrakiTaksitTarihi.HasValue)
+        {
+            return BadRequest(new { mesaj = "Bu kredi için ödeme tarihi tanımlı değil." });
+        }
 
-        if (odenecekTutar <= 0)
+        var now = DateTime.UtcNow;
+        var gunFarki = (now.Date - kredi.SonrakiTaksitTarihi.Value.Date).Days;
+
+        if (gunFarki < -5)
+        {
+            return BadRequest(new
+            {
+                mesaj = "Henüz ödeme döneminde değilsiniz. Taksitler ödeme gününe en fazla 5 gün kala ödenebilir."
+            });
+        }
+
+        var borcDusumu = kredi.KalanBorc <= kredi.AylikTaksit + SonTaksitTolerans
+            ? kredi.KalanBorc
+            : kredi.AylikTaksit;
+
+        if (borcDusumu <= 0)
         {
             kredi.KalanBorc = 0;
             kredi.Durum = "Kapandi";
+            kredi.SonrakiTaksitTarihi = null;
             await _context.SaveChangesAsync();
             return Ok(new { mesaj = "Kredi kapatıldı." });
         }
+
+        var gecikmeli = gunFarki > 0;
+        var tahsilatTutari = gecikmeli
+            ? Math.Round(borcDusumu * (1m + GecikmeGunlukOran * gunFarki), 2)
+            : borcDusumu;
 
         var bakiye = await _context.DefterKayitlar
             .Where(d => d.HesapId == hesapId)
             .SumAsync(d => (decimal?)d.Amount) ?? 0m;
 
-        if (bakiye < odenecekTutar)
+        if (bakiye < tahsilatTutari)
         {
-            return BadRequest("Vadesiz hesabınızda taksit ödemesi için yeterli bakiye bulunmuyor.");
+            return BadRequest(new { mesaj = "Vadesiz hesabınızda taksit ödemesi için yeterli bakiye bulunmuyor." });
         }
 
         var havuzHesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Email == "havuz@bankacuzdan.com");
@@ -207,16 +199,17 @@ public class KrediController : ControllerBase
 
         try
         {
-            var now = DateTime.UtcNow;
             var islemGrupId = Guid.NewGuid();
-            var aciklama = $"Kredi Taksit Tahsilatı - {kredi.KrediTuru}";
+            var aciklama = gecikmeli
+                ? $"Kredi Taksit Tahsilatı (Gecikme Faizi) - {kredi.KrediTuru}"
+                : $"Kredi Taksit Tahsilatı - {kredi.KrediTuru}";
 
             var kullaniciKaydi = new DefterKayit
             {
                 Id = Guid.NewGuid(),
                 HesapId = hesapId,
                 IslemGrupId = islemGrupId,
-                Amount = -odenecekTutar,
+                Amount = -tahsilatTutari,
                 Aciklama = aciklama,
                 CreatedAt = now
             };
@@ -226,17 +219,22 @@ public class KrediController : ControllerBase
                 Id = Guid.NewGuid(),
                 HesapId = havuzHesap.Id,
                 IslemGrupId = islemGrupId,
-                Amount = odenecekTutar,
+                Amount = tahsilatTutari,
                 Aciklama = aciklama,
                 CreatedAt = now
             };
 
-            kredi.KalanBorc -= odenecekTutar;
+            kredi.KalanBorc -= borcDusumu;
 
             if (kredi.KalanBorc <= 0)
             {
                 kredi.KalanBorc = 0;
                 kredi.Durum = "Kapandi";
+                kredi.SonrakiTaksitTarihi = null;
+            }
+            else
+            {
+                kredi.SonrakiTaksitTarihi = kredi.SonrakiTaksitTarihi.Value.AddMonths(1);
             }
 
             _context.DefterKayitlar.Add(kullaniciKaydi);
@@ -245,7 +243,15 @@ public class KrediController : ControllerBase
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
 
-            return Ok(new { mesaj = "Taksit ödemesi başarıyla alındı." });
+            return Ok(new
+            {
+                mesaj = gecikmeli
+                    ? "Gecikmeli taksit ödemesi (gecikme faizi dahil) alındı."
+                    : "Taksit ödemesi başarıyla alındı.",
+                tahsilEdilen = tahsilatTutari,
+                borcDusumu = borcDusumu,
+                gecikmeGunu = gecikmeli ? gunFarki : 0
+            });
         }
         catch
         {
@@ -254,17 +260,34 @@ public class KrediController : ControllerBase
         }
     }
 
-    private static bool TryGetAylikFaizOrani(string krediTuru, out decimal aylikFaizOrani)
+    private static bool TryGetAylikFaizOrani(
+        string krediTuru,
+        string krediAltTuru,
+        int vadeAy,
+        out decimal aylikFaizOrani)
     {
-        aylikFaizOrani = krediTuru switch
+        decimal? baz = (krediTuru, krediAltTuru) switch
         {
-            "Ihtiyac" => 0.035m,
-            "Tasit" => 0.025m,
-            "Konut" => 0.012m,
-            _ => -1m
+            ("Ihtiyac", "Egitim") => 0.030m,
+            ("Ihtiyac", "Tatil") => 0.035m,
+            ("Ihtiyac", "BorcKapatma") => 0.040m,
+            ("Tasit", "SifirKm") => 0.022m,
+            ("Tasit", "IkinciEl") => 0.028m,
+            ("Konut", "IlkEvim") => 0.012m,
+            ("Konut", "Yatirim") => 0.018m,
+            _ => null
         };
 
-        return aylikFaizOrani >= 0m;
+        if (baz is null)
+        {
+            aylikFaizOrani = -1m;
+            return false;
+        }
+
+        var ekstraDonem = Math.Max(0, (vadeAy - 12) / 12);
+        var riskPrimi = ekstraDonem * 0.001m;
+        aylikFaizOrani = baz.Value + riskPrimi;
+        return true;
     }
 
     private static decimal HesaplaAylikTaksit(decimal miktar, decimal aylikFaizOrani, int vadeAy)

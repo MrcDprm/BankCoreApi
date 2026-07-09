@@ -6,12 +6,5 @@
     "Key": "Bu_Proje_Gelistirme_Icin_Kullanilan_Gecici_Bir_Sifredir_12345!",
     "Issuer": "BankaCoreApi",
     "Audience": "BankaWebClient"
-  },
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
-    }
-  },
-  "AllowedHosts": "*"
+  }
 }
