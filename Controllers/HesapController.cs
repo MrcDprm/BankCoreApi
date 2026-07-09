@@ -44,11 +44,51 @@ public class HesapController : ControllerBase
             return BadRequest(new { mesaj = "Geçersiz ay filtresi. İzin verilen değerler: 1, 3, 6, 12, 24." });
         }
 
+        var ozet = await HesapOzetOlusturAsync(hesapId, ay);
+
+        if (ozet is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(ozet);
+    }
+
+    [HttpGet("ekstre/pdf")]
+    public async Task<IActionResult> EkstrePdf([FromQuery] int? ay)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!Guid.TryParse(userId, out var hesapId))
+        {
+            return Unauthorized();
+        }
+
+        if (ay is not null && ay is not (1 or 3 or 6 or 12 or 24))
+        {
+            return BadRequest(new { mesaj = "Geçersiz ay filtresi. İzin verilen değerler: 1, 3, 6, 12, 24." });
+        }
+
+        var ozet = await HesapOzetOlusturAsync(hesapId, ay);
+
+        if (ozet is null)
+        {
+            return NotFound();
+        }
+
+        var donem = ay is null ? "Son 5 İşlem" : $"Son {ay} Ay";
+        var pdfBytes = PdfHelper.EkstreOlustur(ozet, donem);
+
+        return File(pdfBytes, "application/pdf", "Ekstre.pdf");
+    }
+
+    private async Task<HesapOzetResponse?> HesapOzetOlusturAsync(Guid hesapId, int? ay)
+    {
         var hesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == hesapId);
 
         if (hesap is null)
         {
-            return NotFound();
+            return null;
         }
 
         var bakiye = await _context.DefterKayitlar
@@ -133,19 +173,22 @@ public class HesapController : ControllerBase
                 }
             }
 
-            return new IslemOzet(kayit.Amount, kayit.Aciklama, kayit.CreatedAt, karsiHesapAdSoyad);
+            return new IslemOzet(
+                kayit.Amount,
+                kayit.Aciklama,
+                kayit.CreatedAt,
+                karsiHesapAdSoyad,
+                kayit.IslemGrupId);
         }).ToList();
 
         var totpAktifMi = !string.IsNullOrWhiteSpace(hesap.TotpSecretKey);
 
-        var ozet = new HesapOzetResponse(
+        return new HesapOzetResponse(
             hesap.HesapSahibiAd,
             hesap.HesapNo,
             bakiye,
             totpAktifMi,
             sonIslemler);
-
-        return Ok(ozet);
     }
 
     [HttpGet("{id:guid}/bakiye")]
@@ -248,6 +291,67 @@ public class HesapController : ControllerBase
             await transaction.RollbackAsync();
             throw;
         }
+    }
+
+    [HttpPut("profil-guncelle")]
+    public async Task<IActionResult> ProfilGuncelle([FromBody] ProfilGuncelleIstek istek)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!Guid.TryParse(userId, out var hesapId))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(istek.AdSoyad))
+        {
+            return BadRequest(new { mesaj = "Ad soyad boş olamaz." });
+        }
+
+        var hesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == hesapId);
+
+        if (hesap is null)
+        {
+            return NotFound();
+        }
+
+        hesap.HesapSahibiAd = istek.AdSoyad.Trim();
+        await _context.SaveChangesAsync();
+
+        return Ok(new { mesaj = "Profil güncellendi." });
+    }
+
+    [HttpPut("sifre-guncelle")]
+    public async Task<IActionResult> SifreGuncelle([FromBody] SifreGuncelleIstek istek)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!Guid.TryParse(userId, out var hesapId))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(istek.EskiSifre) || string.IsNullOrWhiteSpace(istek.YeniSifre))
+        {
+            return BadRequest(new { mesaj = "Mevcut şifre ve yeni şifre zorunludur." });
+        }
+
+        var hesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == hesapId);
+
+        if (hesap is null)
+        {
+            return NotFound();
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(istek.EskiSifre, hesap.SifreHash))
+        {
+            return BadRequest(new { mesaj = "Mevcut şifre hatalı." });
+        }
+
+        hesap.SifreHash = BCrypt.Net.BCrypt.HashPassword(istek.YeniSifre);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { mesaj = "Şifre güncellendi." });
     }
 
     [HttpPost("{id:guid}/totp-kur")]
