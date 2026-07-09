@@ -12,6 +12,7 @@ public class BankaDbContext : DbContext
     public DbSet<Hesap> Hesaplar { get; set; }
     public DbSet<DefterKayit> DefterKayitlar { get; set; }
     public DbSet<Kredi> Krediler { get; set; }
+    public DbSet<SanalKart> SanalKartlar { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,6 +41,15 @@ public class BankaDbContext : DbContext
             entity.Property(e => e.ToplamBorc).HasPrecision(18, 2);
             entity.Property(e => e.KalanBorc).HasPrecision(18, 2);
             entity.Property(e => e.KrediTuru).HasMaxLength(20);
+            entity.Property(e => e.Durum).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<SanalKart>(entity =>
+        {
+            entity.Property(e => e.KartAdi).HasMaxLength(100);
+            entity.Property(e => e.AylikLimit).HasPrecision(18, 2);
+            entity.Property(e => e.KartNoSifreli).HasMaxLength(512);
+            entity.Property(e => e.CvvSifreli).HasMaxLength(256);
             entity.Property(e => e.Durum).HasMaxLength(50);
         });
     }

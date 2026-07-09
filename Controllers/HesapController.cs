@@ -30,13 +30,18 @@ public class HesapController : ControllerBase
     }
 
     [HttpGet("ozet")]
-    public async Task<IActionResult> GetHesapOzet()
+    public async Task<IActionResult> GetHesapOzet([FromQuery] int? ay)
     {
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         if (!Guid.TryParse(userId, out var hesapId))
         {
             return Unauthorized();
+        }
+
+        if (ay is not null && ay is not (1 or 3 or 6 or 12 or 24))
+        {
+            return BadRequest(new { mesaj = "Geçersiz ay filtresi. İzin verilen değerler: 1, 3, 6, 12, 24." });
         }
 
         var hesap = await _context.Hesaplar.FirstOrDefaultAsync(h => h.Id == hesapId);
@@ -50,11 +55,25 @@ public class HesapController : ControllerBase
             .Where(d => d.HesapId == hesapId)
             .SumAsync(d => d.Amount);
 
-        var kayitlar = await _context.DefterKayitlar
-            .Where(d => d.HesapId == hesapId)
-            .OrderByDescending(d => d.CreatedAt)
-            .Take(10)
-            .ToListAsync();
+        var kayitSorgu = _context.DefterKayitlar
+            .Where(d => d.HesapId == hesapId);
+
+        if (ay is null)
+        {
+            kayitSorgu = kayitSorgu
+                .OrderByDescending(d => d.CreatedAt)
+                .Take(5);
+        }
+        else
+        {
+            var baslangic = DateTime.UtcNow.AddMonths(-ay.Value);
+            kayitSorgu = kayitSorgu
+                .Where(d => d.CreatedAt >= baslangic)
+                .OrderByDescending(d => d.CreatedAt)
+                .Take(100);
+        }
+
+        var kayitlar = await kayitSorgu.ToListAsync();
 
         var transferGrupIdleri = kayitlar
             .Where(k => k.Aciklama == TransferAciklama)
@@ -67,7 +86,10 @@ public class HesapController : ControllerBase
         if (transferGrupIdleri.Count > 0)
         {
             var karsiKayitlar = await _context.DefterKayitlar
-                .Where(d => transferGrupIdleri.Contains(d.IslemGrupId) && d.HesapId != hesapId)
+                .Where(d =>
+                    transferGrupIdleri.Contains(d.IslemGrupId) &&
+                    d.HesapId != hesapId &&
+                    d.Aciklama == TransferAciklama)
                 .ToListAsync();
 
             foreach (var karsiKayit in karsiKayitlar)

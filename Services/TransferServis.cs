@@ -6,6 +6,11 @@ namespace BankCoreApi.Services;
 
 public class TransferServis : ITransferServis
 {
+    private const decimal KomisyonToplam = 2.50m;
+    private const string HavuzEmail = "havuz@bankacuzdan.com";
+    private const string UcretAciklama = "Transfer Ücreti ve BSMV";
+    private const string KomisyonGelirAciklama = "Transfer Komisyon Geliri";
+
     private readonly BankaDbContext _context;
     private readonly IHesapServis _hesapServis;
 
@@ -27,12 +32,35 @@ public class TransferServis : ITransferServis
 
             var bakiye = await _hesapServis.BakiyeGetirAsync(gonderenHesapId);
 
-            if (bakiye < Amount)
+            if (bakiye < Amount + KomisyonToplam)
             {
-                throw new InvalidOperationException("Yetersiz bakiye.");
+                throw new InvalidOperationException(
+                    "Yetersiz bakiye. Transfer tutarı ve 2,50 TL işlem ücreti için bakiyeniz yetersiz.");
+            }
+
+            var havuzHesap = await _context.Hesaplar
+                .FirstOrDefaultAsync(h => h.Email == HavuzEmail);
+
+            if (havuzHesap is null)
+            {
+                var randomDigits = string.Join("", Enumerable.Range(0, 18).Select(_ => Random.Shared.Next(0, 10).ToString()));
+
+                havuzHesap = new Hesap
+                {
+                    Id = Guid.NewGuid(),
+                    HesapNo = "TR" + randomDigits,
+                    HesapSahibiAd = "Banka Sistem Havuzu",
+                    Email = HavuzEmail,
+                    SifreHash = "system-no-login",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.Hesaplar.Add(havuzHesap);
+                await _context.SaveChangesAsync();
             }
 
             Guid islemGrupId = Guid.NewGuid();
+            var now = DateTime.UtcNow;
 
             var paraCikisi = new DefterKayit
             {
@@ -41,7 +69,7 @@ public class TransferServis : ITransferServis
                 IslemGrupId = islemGrupId,
                 Amount = -Amount,
                 Aciklama = aciklama,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = now
             };
 
             var paraGirisi = new DefterKayit
@@ -51,11 +79,33 @@ public class TransferServis : ITransferServis
                 IslemGrupId = islemGrupId,
                 Amount = Amount,
                 Aciklama = aciklama,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = now
+            };
+
+            var ucretCikisi = new DefterKayit
+            {
+                Id = Guid.NewGuid(),
+                HesapId = gonderenHesapId,
+                IslemGrupId = islemGrupId,
+                Amount = -KomisyonToplam,
+                Aciklama = UcretAciklama,
+                CreatedAt = now
+            };
+
+            var komisyonGirisi = new DefterKayit
+            {
+                Id = Guid.NewGuid(),
+                HesapId = havuzHesap.Id,
+                IslemGrupId = islemGrupId,
+                Amount = KomisyonToplam,
+                Aciklama = KomisyonGelirAciklama,
+                CreatedAt = now
             };
 
             _context.DefterKayitlar.Add(paraCikisi);
             _context.DefterKayitlar.Add(paraGirisi);
+            _context.DefterKayitlar.Add(ucretCikisi);
+            _context.DefterKayitlar.Add(komisyonGirisi);
 
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
